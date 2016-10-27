@@ -31,6 +31,7 @@ import sys
 import os
 PATH = os.path.split(os.path.realpath(__file__))[0]
 
+#这里根据实际情况获取ENDPOINT
 ENDPOINT = os.environ['PS1_HOSTNAME']    
     
 def mylogger(logtag, logfile):
@@ -211,7 +212,7 @@ class TengineReqStat(object):
         '''
         # 当前请求的结果
         ret1 = {}
-        for stat in self.ng_stat[0]:s
+        for stat in self.ng_stat[0]:
             stat = stat.strip().split(',')
             ret1[stat[0]] = [stat[1],stat[5],stat[6],stat[7],stat[8],stat[9],stat[10]]
             
@@ -432,20 +433,11 @@ class TengineReqStat(object):
     
 
 def main():
-    #ret_stat_url = 'http://127.0.0.1:2000/req.status'
-    #open_falcon_api = 'http://127.0.0.1:1988/v1/push'
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-domains', action="store", dest='domains', help='domains: www.test.com,www.test1.com')
-    parser.add_argument('-req_stats_api', action="store", dest='req_stats_api', help='req_stats_api: http://127.0.0.1:2000/req.status')
-    parser.add_argument('-open_falcon_api', action="store", dest='open_falcon_api', help='open_falcon_api: http://127.0.0.1:1988/v1/push')
+    ret_stat_url = 'http://127.0.0.1:2000/req.status'
+    open_falcon_api = 'http://127.0.0.1:1988/v1/push'
     
-    args = parser.parse_args()
-    
-    domains = args.domains
-    req_stats_api = args.req_stats_api
-    open_falcon_api = args.open_falcon_api
+    domains = ['www.test.com','www.test1.com','www.test2.com']
     if domains:
-        domain_list = domains.split(',')
         ng_req_stat = TengineReqStat(req_stats_api,domain_list)
     else:
         ng_req_stat = TengineReqStat(req_stats_api)

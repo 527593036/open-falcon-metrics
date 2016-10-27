@@ -8,7 +8,7 @@
 	
 	1.1、tengine配置好reqstat（http_reqstatus模块）
 	
-	1.2、从5个维度来监控nginx
+	1.2、按域名从5个维度来监控nginx(req/min)
 	
 		1.2.1、流量
 		
