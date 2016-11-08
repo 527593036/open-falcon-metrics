@@ -22,6 +22,6 @@
 		
 	1.3、crontab部署每分钟执行一次
 		
-# todo
+2、RedisMonitor.py，redis状态监控脚本
 
-1、TengineReqStat.py，去参数，从文件读取监控域名，tengine状态接口，open-falcon上报接口配置
+3、MemcachedMonitor.py, memcached状态监控脚本

@@ -15,9 +15,6 @@ nginx状态 数据上报到open-falcon，从5个维度监控nginx: 流量维度,
 3、某reqstat测试结果：
 ansible.api.xz.com,192.168.33.11:80,164,456,2,2,2,0,0,0,0,12,2,12,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 192.168.33.11,192.168.33.11:23456,7317,6482,6,20,18,0,2,0,0,0,0,0,0,18,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0
-
-4、todo
-新增从配置文件读取监控域名,去掉参数
 '''
 
 import argparse
@@ -25,81 +22,40 @@ import httplib2
 import shutil
 import time
 import json
-import logging
+from logger import mylogger
+import http_api
+import iniparse
+from endpoint import EndPoint as myendpoint
 
 import sys
 import os
 PATH = os.path.split(os.path.realpath(__file__))[0]
 
-#这里根据实际情况获取ENDPOINT
-ENDPOINT = os.environ['PS1_HOSTNAME']    
-    
-def mylogger(logtag, logfile):
-    # 创建一个logger
-    logger = logging.getLogger(logtag)
-    logger.setLevel(logging.DEBUG)
 
-    # 创建一个handler，用于写入日志文件
-    fh = logging.FileHandler(logfile)
-    fh.setLevel(logging.DEBUG)
-
-    # 再创建一个handler，用于输出到控制台
-    # ch = logging.StreamHandler()
-    # ch.setLevel(logging.DEBUG)
-
-    # 定义handler的输出格式
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    fh.setFormatter(formatter)
-    # ch.setFormatter(formatter)
-
-    # 给logger添加handler
-    logger.addHandler(fh)
-    # logger.addHandler(ch)
-
-    return logger
-    
+ENDPOINT = myendpoint()
     
 logger = mylogger("TENGINE STATUS", PATH+'/../logs/nginx_status.log')
-            
-
-def http_api(api,method='GET',metrics=None):
-    ret = []
-    http = httplib2.Http()
-    logger = mylogger("NGINX STATUS", PATH+'/../logs/nginx_status.log')
-    req_body = json.dumps(metrics)
-    logger.info(req_body)
-    try:
-        if method == 'GET':
-            response, content = http.request(api,'GET')
-            ret = [response,content]
-        elif method == 'POST':
-            response, content = http.request(api,'POST',body=req_body, headers={'Content-Type': 'application/json'})
-            ret = [response,content]
-        return ret
-    except httplib2.HttpLib2Error, e:
-        raise e
-     
         
 NGINX_STAT_FP_CUR = PATH + '/../logs/nginx.status.tmp'
 NGINX_STAT_FP_AGO = PATH + '/../logs/nginx.status.monitor'
 
         
 class TengineReqStat(object):
-    def __init__(self,req_stat_url,domain_list=None):
+    def __init__(self,req_stat_url,step=60,domain_list=None):
         self.req_stat_url = req_stat_url
+        self.step = step
         self.ts = int(time.time())
         self.ng_stat = self._nginx_stat()
         self.ng_stat_domains = [ stat.strip().split(',')[0] for stat in self.ng_stat[0] ]
         self.monitor_domain_list = domain_list if domain_list else self.ng_stat_domains
         
     def _nginx_stat(self):
-        ret = http_api(self.req_stat_url)[1]
+        ret = http_api.get_req(self.req_stat_url)[1]
         with open(NGINX_STAT_FP_CUR,'wb') as fp:
             fp.write(ret)
         #如果是第一次请求
         if not shutil.os.path.isfile(NGINX_STAT_FP_AGO):
             shutil.copyfile(NGINX_STAT_FP_CUR,NGINX_STAT_FP_AGO)
-        logger.info('生成nginx.status.tmp')
         
         with open(NGINX_STAT_FP_CUR,'r') as fp:
             nginx_stat_cur = [stat for stat in fp]
@@ -119,13 +75,15 @@ class TengineReqStat(object):
         ret1 = {}
         for stat in self.ng_stat[0]:
             stat = stat.strip().split(',')
-            ret1[stat[0]] = [stat[1],stat[2],stat[3]]
+            if stat[0] in self.monitor_domain_list:
+                ret1[stat[0]] = [stat[1],stat[2],stat[3]]
             
         # 上一次请求的结果       
         ret2 = {}
         for stat in self.ng_stat[1]:
             stat = stat.strip().split(',')
-            ret2[stat[0]] = [stat[1],stat[2],stat[3]]
+            if stat[0] in self.monitor_domain_list:
+                ret2[stat[0]] = [stat[1],stat[2],stat[3]]
         
         #按域名获取带宽的metrics,合成列表格式(包含字典)
         ret = []
@@ -133,27 +91,28 @@ class TengineReqStat(object):
             if domain in self.monitor_domain_list:
                 bindwith_in = int(float(int(ret1[domain][1]) - int(ret2[domain][1] if ret2[domain][1] else ret1[domain][1]))/1024*8)
                 bindwith_out = int(float(int(ret1[domain][2]) - int(ret2[domain][2] if ret2[domain][2] else ret1[domain][2]))/1024*8)
-                endpoint = ENDPOINT + '_' + ret1[domain][0].split(':')[1]
+                endpoint = ENDPOINT
+                http_port = ret1[domain][0].split(':')[1]
             
                 bind_with_in_metric = {
                     'endpoint': endpoint,
-                    'metric': 'Kbit_in',
+                    'metric': 'nginx.Kbit_in',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': bindwith_in,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(bind_with_in_metric)
             
                 bind_with_out_metric = {
                     'endpoint': endpoint,
-                    'metric': 'Kbit_out',
+                    'metric': 'nginx.Kbit_out',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': bindwith_out,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(bind_with_out_metric)
 
@@ -169,28 +128,31 @@ class TengineReqStat(object):
         ret1 = {}
         for stat in self.ng_stat[0]:
             stat = stat.strip().split(',')
-            ret1[stat[0]] = [stat[1],stat[4]]
+            if stat[0] in self.monitor_domain_list:
+                ret1[stat[0]] = [stat[1],stat[4]]
             
         # 上一次请求的结果        
         ret2 = {}
         for stat in self.ng_stat[1]:
             stat = stat.strip().split(',')
-            ret2[stat[0]] = [stat[1],stat[4]]
+            if stat[0] in self.monitor_domain_list:
+                ret2[stat[0]] = [stat[1],stat[4]]
         
         #按域名获取总连接数的metrics,合成列表格式(包含字典)
         ret = []
         for domain in self.ng_stat_domains:
             if domain in self.monitor_domain_list:
-                endpoint = ENDPOINT + '_' + ret1[domain][0].split(':')[1]
+                endpoint = ENDPOINT
+                http_port = ret1[domain][0].split(':')[1]
                 conn_total = int(ret1[domain][1]) - int(ret2[domain][1] if ret2[domain][1] else ret1[domain][1])
                 conn_total_metric = {
                     'endpoint': endpoint,
-                    'metric': 'conn',
+                    'metric': 'nginx.conn',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': conn_total,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
             
                 ret.append(conn_total_metric)
@@ -214,13 +176,15 @@ class TengineReqStat(object):
         ret1 = {}
         for stat in self.ng_stat[0]:
             stat = stat.strip().split(',')
-            ret1[stat[0]] = [stat[1],stat[5],stat[6],stat[7],stat[8],stat[9],stat[10]]
+            if stat[0] in self.monitor_domain_list:
+                ret1[stat[0]] = [stat[1],stat[5],stat[6],stat[7],stat[8],stat[9],stat[10]]
             
         #上一次请求的结果        
         ret2 = {}
         for line in self.ng_stat[1]:
             stat = line.strip().split(',')
-            ret2[stat[0]] = [stat[1],stat[5],stat[6],stat[7],stat[8],stat[9],stat[10]]
+            if stat[0] in self.monitor_domain_list:
+                ret2[stat[0]] = [stat[1],stat[5],stat[6],stat[7],stat[8],stat[9],stat[10]]
         
         #按域名获取请求数的metrics,合成列表格式(包含字典)
         ret = []
@@ -232,71 +196,72 @@ class TengineReqStat(object):
                 http_4xx = int(ret1[domain][4]) - int(ret2[domain][4] if ret2[domain][4] else ret1[domain][4])
                 http_5xx = int(ret1[domain][5]) - int(ret2[domain][5] if ret2[domain][5] else ret1[domain][5])
                 http_other = int(ret1[domain][6]) - int(ret2[domain][6] if ret2[domain][6] else ret1[domain][6])
-                endpoint = ENDPOINT + '_' + ret1[domain][0].split(':')[1]
+                endpoint = ENDPOINT 
+                http_port = ret1[domain][0].split(':')[1]
             
                 req_total_metric = {
                     'endpoint': endpoint,
-                    'metric': 'req_total',
+                    'metric': 'nginx.req_total',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': req_total,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain 
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(req_total_metric)
             
                 http_2xx_metric = {
                     'endpoint': endpoint,
-                    'metric': 'http_2xx',
+                    'metric': 'nginx.http_2xx',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': http_2xx,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(http_2xx_metric)
             
                 http_3xx_metric = {
                     'endpoint': endpoint,
-                    'metric': 'http_3xx',
+                    'metric': 'nginx.http_3xx',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': http_3xx,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(http_3xx_metric)
             
                 http_4xx_metric = {
                     'endpoint': endpoint,
-                    'metric': 'http_4xx',
+                    'metric': 'nginx.http_4xx',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': http_4xx,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(http_4xx_metric)
             
                 http_5xx_metric = {
                     'endpoint': endpoint,
-                    'metric': 'http_5xx',
+                    'metric': 'nginx.http_5xx',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': http_5xx,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(http_5xx_metric)
             
                 httpotherstatus_metric = {
                     'endpoint': endpoint,
-                    'metric': 'http_other_status',
+                    'metric': 'nginx.http_other_status',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': http_other,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(httpotherstatus_metric)
                 
@@ -318,13 +283,15 @@ class TengineReqStat(object):
         ret1 = {}
         for stat in self.ng_stat[0]:
             stat = stat.strip().split(',')
-            ret1[stat[0]] = [stat[1],stat[5],stat[11],stat[12],stat[13]]
+            if stat[0] in self.monitor_domain_list:
+                ret1[stat[0]] = [stat[1],stat[5],stat[11],stat[12],stat[13]]
                 
         # 上一次请求的结果  
         ret2 = {}
         for line in self.ng_stat[1]:
             stat = line.strip().split(',')
-            ret2[stat[0]] = [stat[1],stat[5],stat[11],stat[12],stat[13]]
+            if stat[0] in self.monitor_domain_list:
+                ret2[stat[0]] = [stat[1],stat[5],stat[11],stat[12],stat[13]]
         
         # 平均时间消耗计算
         ret = []
@@ -338,27 +305,28 @@ class TengineReqStat(object):
                 cur_req_avg_time = round(float(cur_req_time)/cur_req_count,1) if cur_req_count else 0
                 # upstream总平均耗时
                 cur_ups_req_avg_time = round(float(cur_ups_req_time)/cur_ups_req_count,1) if cur_ups_req_count else 0
-                endpoint = ENDPOINT + '_'+ ret1[domain][0].split(':')[1]
+                endpoint = ENDPOINT 
+                http_port = ret1[domain][0].split(':')[1]
                 
                 req_rt = {
                     'endpoint': endpoint,
-                    'metric': 'req_rt',
+                    'metric': 'nginx.req_rt',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': cur_req_avg_time,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(req_rt)
                 
                 ups_rt = {
                     'endpoint': endpoint,
-                    'metric': 'ups_rt',
+                    'metric': 'nginx.ups_rt',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': cur_ups_req_avg_time,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(ups_rt)
 
@@ -375,13 +343,15 @@ class TengineReqStat(object):
         ret1 = {}
         for stat in self.ng_stat[0]:
             stat = stat.strip().split(',')
-            ret1[stat[0]] = [stat[1],stat[12],stat[29],stat[30]]
+            if stat[0] in self.monitor_domain_list:
+                ret1[stat[0]] = [stat[1],stat[12],stat[29],stat[30]]
                 
         # 上一次请求的结果  
         ret2 = {}
         for stat in self.ng_stat[1]:
             stat = stat.strip().split(',')
-            ret2[stat[0]] = [stat[1],stat[12],stat[29],stat[30]]
+            if stat[0] in self.monitor_domain_list:
+                ret2[stat[0]] = [stat[1],stat[12],stat[29],stat[30]]
         
         #按域名获取ups请求数的metrics,合成列表格式(包含字典)
         ret = []
@@ -390,38 +360,39 @@ class TengineReqStat(object):
                 ups_req = int(ret1[domain][1]) - int(ret2[domain][1] if ret2[domain][1] else ret1[domain][1])
                 ups_http_4xx = int(ret1[domain][2]) - int(ret2[domain][2] if ret2[domain][2] else ret1[domain][2])
                 ups_http_5xx = int(ret1[domain][3]) - int(ret2[domain][3] if ret2[domain][3] else ret1[domain][3])
-                endpoint = ENDPOINT + '_' + ret1[domain][0].split(':')[1]
+                endpoint = ENDPOINT 
+                http_port = ret1[domain][0].split(':')[1]
             
                 ups_req_metric = {
                     'endpoint': endpoint,
-                    'metric': 'ups_req',
+                    'metric': 'nginx.ups_req',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': ups_req,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(ups_req_metric)
             
                 ups_http_4xx_metric = {
                     'endpoint': endpoint,
-                    'metric': 'ups_http_4xx',
+                    'metric': 'nginx.ups_http_4xx',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': ups_http_4xx,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(ups_http_4xx_metric)
             
                 http_ups_5xx_metric = {
                     'endpoint': endpoint,
-                    'metric': 'ups_http_5xx',
+                    'metric': 'nginx.ups_http_5xx',
                     'timestamp': self.ts,
-                    'step': 60,
+                    'step': self.step,
                     'value': ups_http_5xx,
                     'counterType': 'GAUGE',
-                    'tags': 'domain=%s' % domain
+                    'tags': 'domain=%s,http_port=%s' % (domain,http_port)
                 }
                 ret.append(http_ups_5xx_metric)
             
@@ -432,20 +403,19 @@ class TengineReqStat(object):
         shutil.move(NGINX_STAT_FP_CUR,NGINX_STAT_FP_AGO)
     
 
-def main():
-    ret_stat_url = 'http://127.0.0.1:2000/req.status'
-    open_falcon_api = 'http://127.0.0.1:1988/v1/push'
-    
-    domains = ['www.test.com','www.test1.com','www.test2.com']
-    if domains:
-        ng_req_stat = TengineReqStat(req_stats_api,domain_list)
+def main():    
+    domain_list = iniparse.domains_parser()
+    req_stats_api = iniparse.TENGINE_STAT_API
+    open_falcon_api = iniparse.FALCON_PUSH_API
+    if domain_list:
+        ng_req_stat = TengineReqStat(req_stats_api,domain_list=domain_list)
     else:
         ng_req_stat = TengineReqStat(req_stats_api)
     
     ng_req_stat.updatefp()
     mymetrics = ng_req_stat.bindwith() + ng_req_stat.conn_total() + ng_req_stat.http_code() + ng_req_stat.req_time() + ng_req_stat.ups_req()
-    print(mymetrics)
-    print(http_api(open_falcon_api,method='POST',metrics=mymetrics))
+    logger.info(mymetrics)
+    logger.info(http_api.post_req(open_falcon_api,mymetrics))
     
 
 if __name__ == '__main__':
