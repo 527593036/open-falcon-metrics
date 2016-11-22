@@ -29,8 +29,8 @@ logger = mylogger("MEMCACHED STATUS", PATH+'/../logs/memcached_status.log')
 
 ENDPOINT = myendpoint()
 
-MEMCACHED_HOST = "10.1.3.62"
-MEMCACHED_PORT = "11215"
+MEMCACHED_HOST = "127.0.0.1"
+MEMCACHED_PORT = "11211"
 FALCON_CLIETN_PUSH = "http://127.0.0.1:1988/v1/push"
 
 
@@ -76,7 +76,6 @@ class MemcachedStats(object):
 
         return ret
 
-
     def memcached_falcon_data(self):
         memcached_stat_ret = []
         for k,v in self.memcache_stat.items():
@@ -100,7 +99,7 @@ def main():
     mymetrics = mem.memcached_falcon_data()
     print(json.dumps(mymetrics, indent=4))
     logger.info(mymetrics)
-    logger.info(http_api.post_req(FALCON_CLIETN_PUSH, mymetrics))
+    logger.info(http_api.facon_push_handler(mymetrics, api=FALCON_CLIETN_PUSH))
 
 
 if __name__ == '__main__':

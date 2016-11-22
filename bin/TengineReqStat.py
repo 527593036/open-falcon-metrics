@@ -17,17 +17,14 @@ ansible.api.xz.com,192.168.33.11:80,164,456,2,2,2,0,0,0,0,12,2,12,2,2,0,0,0,0,0,
 192.168.33.11,192.168.33.11:23456,7317,6482,6,20,18,0,2,0,0,0,0,0,0,18,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0
 '''
 
-import argparse
-import httplib2
+import urllib2
 import shutil
 import time
-import json
 from logger import mylogger
 import http_api
 import iniparse
 from endpoint import EndPoint as myendpoint
 
-import sys
 import os
 PATH = os.path.split(os.path.realpath(__file__))[0]
 
@@ -45,12 +42,25 @@ class TengineReqStat(object):
         self.req_stat_url = req_stat_url
         self.step = step
         self.ts = int(time.time())
-        self.ng_stat = self._nginx_stat()
+        self.ng_stat = self.__nginx_stat()
         self.ng_stat_domains = [ stat.strip().split(',')[0] for stat in self.ng_stat[0] ]
         self.monitor_domain_list = domain_list if domain_list else self.ng_stat_domains
-        
-    def _nginx_stat(self):
-        ret = http_api.get_req(self.req_stat_url)[1]
+
+    def __http_handler(self):
+        handler = urllib2.HTTPHandler()
+        opener = urllib2.build_opener(handler)
+        request = urllib2.Request(self.req_stat_url)
+        try:
+            conn = opener.open(request)
+            response = conn.headers.dict
+            response['code'] = conn.code
+            return [response,conn.read()]
+        except urllib2.HTTPError, e:
+            raise e
+
+    def __nginx_stat(self):
+        #ret = http_api.get_req(self.req_stat_url)[1]
+        ret = self.__http_handler()[1]
         with open(NGINX_STAT_FP_CUR,'wb') as fp:
             fp.write(ret)
         #如果是第一次请求
@@ -415,7 +425,7 @@ def main():
     ng_req_stat.updatefp()
     mymetrics = ng_req_stat.bindwith() + ng_req_stat.conn_total() + ng_req_stat.http_code() + ng_req_stat.req_time() + ng_req_stat.ups_req()
     logger.info(mymetrics)
-    logger.info(http_api.post_req(open_falcon_api,mymetrics))
+    logger.info(http_api.facon_push_handler(mymetrics,api=open_falcon_api))
     
 
 if __name__ == '__main__':

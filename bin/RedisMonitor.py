@@ -152,7 +152,7 @@ def main():
     mymetrics = rds.redis_falcon_data()
     logger.info(mymetrics)
     #print(json.dumps(mymetric, indent=4))
-    logger.info(http_api.post_req(FALCON_CLIETN_PUSH,mymetric))
+    logger.info(http_api.facon_push_handler(mymetrics,api=FALCON_CLIETN_PUSH))
 
 
 if __name__ == '__main__':

@@ -10,6 +10,8 @@ import os
 
 PATH = os.path.split(os.path.realpath(__file__))[0]
 
+
+#可以从域名管理系统接口或者数据库等获取
 def domains_parser():
     ret = []
     conf = ConfigParser.ConfigParser()
@@ -20,7 +22,8 @@ def domains_parser():
             ret += v.split(',')
             
     return ret
-    
+
+
 def api_parser(api_sec):
     ret = {}
     conf = ConfigParser.ConfigParser()
@@ -32,6 +35,7 @@ def api_parser(api_sec):
                 ret[k] = v
             
     return ret.values()[0]
+
     
 TENGINE_STAT_API = api_parser('tengine')
 FALCON_PUSH_API = api_parser('falcon-agent')
